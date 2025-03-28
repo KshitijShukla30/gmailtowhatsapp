@@ -1,3 +1,5 @@
+from flask import Flask
+import threading
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from google.auth.exceptions import RefreshError
@@ -14,6 +16,13 @@ import logging
 
 # Load environment variables
 load_dotenv()
+
+# Flask app to keep Render active
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Email Reader is running!"
 
 # Gmail API setup
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
@@ -34,6 +43,7 @@ def save_last_email_time(last_time):
     with open(LAST_EMAIL_TIME_FILE, 'w') as file:
         json.dump(last_time.isoformat(), file)
 
+# Gmail Authentication
 def authenticate_gmail():
     creds = Credentials(
         token=os.getenv('GMAIL_TOKEN'),
@@ -52,7 +62,7 @@ def authenticate_gmail():
 
     return build('gmail', 'v1', credentials=creds, cache_discovery=False)
 
-# Recursive function to extract email body
+# Extract email body
 def extract_body(payload):
     if 'parts' in payload:
         for part in payload['parts']:
@@ -60,6 +70,7 @@ def extract_body(payload):
                 return base64.urlsafe_b64decode(part['body']['data']).decode('utf-8', errors='ignore')
     return "No content available."
 
+# Fetch the latest unread email
 def get_latest_email(service):
     results = service.users().messages().list(
         userId='me',
@@ -83,6 +94,7 @@ def get_latest_email(service):
 
     return {'sender': sender, 'subject': subject, 'body': body, 'time': timestamp}
 
+# Send WhatsApp message
 def send_whatsapp_message(message_body):
     account_sid = os.getenv('ACCOUNT_SID')
     auth_token = os.getenv('AUTH_TOKEN')
@@ -101,7 +113,8 @@ def send_whatsapp_message(message_body):
     except Exception as e:
         logging.error(f"❌ Failed to send WhatsApp message: {e}")
 
-if __name__ == "__main__":
+# Email checking logic
+def email_checker():
     last_email_time = load_last_email_time()
 
     while True:
@@ -126,3 +139,10 @@ if __name__ == "__main__":
             logging.error(f"❗ An error occurred: {e}")
 
         time.sleep(1000)  # Check for new emails every ~5 seconds
+
+if __name__ == "__main__":
+    # Start email checker in a separate thread
+    threading.Thread(target=email_checker, daemon=True).start()
+
+    # Run Flask app to keep Render service active
+    app.run(host='0.0.0.0', port=10000)
